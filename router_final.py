@@ -8,9 +8,11 @@ import pandas as pd
 import os
 import time
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.metrics import roc_auc_score, accuracy_score
 import numpy as np
+import wandb
+
 
 CONFIG = {
     "base": "Qwen/Qwen2.5-1.5B-Instruct", # base model
@@ -29,8 +31,8 @@ CONFIG = {
     },
 
     "PEAK_LR": 1e-6,
-    "BATCH_SIZE": 16,
-    "EPOCHS": 8,
+    "BATCH_SIZE": 32,
+    "EPOCHS": 5,
     "WEIGHT_DECAY": 0.04,
     "NUM_WARMUP_STEPS": 50,
     "SAVE_PATH": "models/router_qwen2.5"
@@ -106,7 +108,11 @@ def load_data(file_path, length=None):
     df_val = df.drop(df_train.index).reset_index(drop=True)
     df_train = df_train.reset_index(drop=True)
 
-    return df_train, df_val
+    num_pos = sum(df_train['gemini-2.5-flash-lite_response'].apply(lambda d: d['is_correct']))
+    num_neg = len(df_train) - num_pos
+    weight_value = num_neg / num_pos
+
+    return df_train, df_val, weight_value
 
 def df_to_tensors(df):
     queries, t_acc, t_lat, t_price = [], [], [], []
@@ -148,11 +154,11 @@ class Router(nn.Module):
         return {'acc': acc, 'lat': lat, 'price': price}
 
 class RouterLoss(nn.Module):
-    def __init__(self, weight_acc=1.0, weight_lat=1.0, weight_price=1.0):
+    def __init__(self, weight_acc=1.0, weight_lat=1.0, weight_price=1.0, pos_weight=None):
             super().__init__()
             self.weights = (weight_acc, weight_lat, weight_price)
             # BCEWithLogitsLoss is the correct, stable loss for logits
-            self.bce, self.mse = nn.BCEWithLogitsLoss(), nn.MSELoss() 
+            self.bce, self.mse = nn.BCEWithLogitsLoss(pos_weight=pos_weight), nn.MSELoss() 
 
     def forward(self, preds, targets):
         total_loss = 0
@@ -170,20 +176,22 @@ class RouterLoss(nn.Module):
             targets['price']
         )
         total_loss = self.weights[0] * loss_acc + self.weights[1] * loss_lat + self.weights[2] * loss_price
-        return total_loss
+        return total_loss, loss_acc, loss_lat, loss_price
 
 
-def validate(router, tokenizer, df_val, loss_fn, device, writer=None, epoch=0):
+def validate(router, tokenizer, df_val, loss_fn, device, epoch=0, global_step=0):
     router.eval()
     queries, t_acc, t_lat, t_price = df_to_tensors(df_val)
     inputs = tokenizer(queries, padding=True, truncation=True, return_tensors='pt')
-    
-    # FIX: Targets should be float32 for stable loss calculation
+
     targets = {
         'acc': torch.tensor(t_acc, dtype=torch.float32).unsqueeze(1),
         'lat': torch.tensor(t_lat, dtype=torch.float32).unsqueeze(1),
         'price': torch.tensor(t_price, dtype=torch.float32).unsqueeze(1)
     }
+
+    all_preds_acc = []
+    all_targets_acc = []
 
     batch_size = CONFIG["BATCH_SIZE"]
     total_val_loss = 0.0
@@ -200,21 +208,40 @@ def validate(router, tokenizer, df_val, loss_fn, device, writer=None, epoch=0):
             # Autocast is used for the base model's float16 weights
             with torch.amp.autocast('cuda'):
                 preds = router(b_input['input_ids'], b_input['attention_mask'])
-                loss = loss_fn(preds, b_target)
+                loss, loss_acc, loss_lat, loss_price = loss_fn(preds, b_target)
+                all_preds_acc.extend(torch.sigmoid(preds['acc']).detach().float().cpu().numpy())
+                all_targets_acc.extend(b_target['acc'].detach().float().cpu().numpy())
+
+            wandb.log({
+                "loss/val_total": loss.item(),
+                "loss/val_acc": loss_acc.item(),
+                "loss/val_lat": loss_lat.item(),
+                "loss/val_price": loss_price.item(),
+            }, step=global_step)
             
             total_val_loss += loss.item()
             num_batches += 1
 
+    try:
+        val_auc = roc_auc_score(all_targets_acc, all_preds_acc)
+        # Convert probs to 0 or 1
+        binary_preds = [1 if p > 0.5 else 0 for p in all_preds_acc]
+        val_acc_metric = accuracy_score(all_targets_acc, binary_preds)
+    except ValueError:
+        val_auc = 0.5 # Handle single-class edge cases
+
+    print(f"Validation AUC: {val_auc:.4f}")
+    wandb.log({"val/auc": val_auc, "val/accuracy_metric": val_acc_metric}, step=global_step)
+
+
     avg_loss = total_val_loss / num_batches
 
     print(f"Validation Loss (Epoch {epoch+1}): {avg_loss:.4f}")
-    if writer:
-        writer.add_scalar("Loss/val", avg_loss, epoch + 1)
+    wandb.log({"loss/val": avg_loss}, step=epoch)
     return avg_loss
 
 
 def train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, device, epochs, batch_size):
-    writer = SummaryWriter(log_dir="runs/router_training")
     router.train()
     global_step = 0
 
@@ -239,7 +266,15 @@ def train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, d
             # Autocast runs the forward pass in float16 where safe
             with torch.amp.autocast('cuda'):
                 preds = router(b_input['input_ids'], b_input['attention_mask'])
-                loss = loss_fn(preds, b_target)
+                loss, loss_acc, loss_lat, loss_price = loss_fn(preds, b_target)
+
+            wandb.log({
+                "loss/train_total": loss.item(),
+                "loss/train_acc": loss_acc.item(),
+                "loss/train_lat": loss_lat.item(),
+                "loss/train_price": loss_price.item(),
+                "lr": scheduler.get_last_lr()[0]
+            }, step=global_step)
             
             # 1. Scale loss and backward pass
             scaler.scale(loss).backward()
@@ -254,26 +289,19 @@ def train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, d
             # 4. Step optimizer and update scaler
             scaler.step(opt)
 
+            scaler.update()
             scheduler.step()
 
-            scaler.update()
-
-            writer.add_scalar("Learning_Rate", scheduler.get_last_lr()[0], global_step)
-
             total_loss += loss.item()
-            writer.add_scalar("Loss/train", loss.item(), global_step)
+            wandb.log({"loss/train": loss.item(), "lr": scheduler.get_last_lr()[0]}, step=global_step)
             global_step += 1
 
         avg_loss = total_loss / (len(inputs['input_ids']) / batch_size)
         print(f"Epoch {epoch+1} done in {time.time()-start_time:.1f}s | Avg Loss: {avg_loss:.4f}")
-        writer.add_scalar("Loss/epoch_avg", avg_loss, epoch+1)
+        wandb.log({"loss/epoch_avg": avg_loss}, step=global_step)
 
-        val_loss = validate(router, tokenizer, df_val, loss_fn, device, writer, epoch)
+        val_loss = validate(router, tokenizer, df_val, loss_fn, device, epoch, global_step)
         print(f"Validation Loss: {val_loss:.4f}")
-
-    writer.close()
-    print("TensorBoard logs written to 'runs/router_training'.")
-
 
 def infer(router, tokenizer, prompt, device):
     router.eval()
@@ -291,10 +319,16 @@ def infer(router, tokenizer, prompt, device):
 
 def main():
     print("Loading data...")
-    df_train, df_val = load_data("data/all_providers_results_parallelized.jsonl", length=5000)
+    df_train, df_val, weight_value = load_data("data/all_providers_results_parallelized.jsonl", length=5000)
     df_train, df_val = df_train[['question', 'gemini-2.5-flash-lite_response']], df_val[['question', 'gemini-2.5-flash-lite_response']]
 
     print("Training data size:", len(df_train), "Validation data size:", len(df_val))
+    print(f"Using pos_weight: {weight_value:.4f} to handle class imbalance.")
+
+    wandb.init(
+        project="router_qwen2.5",
+        config=CONFIG
+    )
     
     queries, t_acc, t_lat, t_price = df_to_tensors(df_train)
 
@@ -311,6 +345,7 @@ def main():
     }
 
     router = Router(CONFIG["base"]).to(CONFIG["device"])
+    pos_weight_tensor = torch.tensor([weight_value]).to(CONFIG["device"])
 
     for param in router.base_model.parameters():
         param.requires_grad = False
@@ -332,7 +367,7 @@ def main():
 
 
     opt = optim.AdamW(router.parameters(), lr=CONFIG["PEAK_LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
-    loss_fn = RouterLoss()
+    loss_fn = RouterLoss(pos_weight=pos_weight_tensor)
     num_training_steps = (len(inputs['input_ids']) // CONFIG["BATCH_SIZE"]) * CONFIG["EPOCHS"]
     scheduler = get_linear_schedule_with_warmup(opt, num_warmup_steps=CONFIG["NUM_WARMUP_STEPS"], num_training_steps=num_training_steps)
 
@@ -345,6 +380,7 @@ def main():
     torch.save(router.state_dict(), os.path.join(CONFIG["SAVE_PATH"], "router.pt"))
     tokenizer.save_pretrained(CONFIG["SAVE_PATH"])
     print(f"Router weights and tokenizer saved to {CONFIG["SAVE_PATH"]}")
+    wandb.finish()
 
     # Test inference
     test_query = "Explain why the sky is blue."

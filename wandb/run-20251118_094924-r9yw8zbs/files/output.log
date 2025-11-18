@@ -1,0 +1,40 @@
+Trainable: 190,734,851, Frozen: 1,356,523,008
+Training router...
+Epoch 1:   0%|          | 0/563 [00:00<?, ?it/s]/usr/local/lib/python3.12/dist-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+Epoch 1: 100%|██████████| 563/563 [08:15<00:00,  1.14it/s]
+Epoch 1 done in 495.5s | Avg Loss: 0.6748
+Validation: 100%|██████████| 63/63 [00:29<00:00,  2.14it/s]
+Validation AUC: 0.5273
+Validation Loss (Epoch 1): 0.4325
+Validation Loss: 0.4325
+Epoch 2:   0%|          | 1/563 [00:00<08:13,  1.14it/s]wandb: WARNING Tried to log to step 0 that is less than the current step 562. Steps must be monotonically increasing, so this data will be ignored. See https://wandb.me/define-metric to log data out of order.
+Epoch 2: 100%|██████████| 563/563 [08:15<00:00,  1.14it/s]
+Epoch 2 done in 495.9s | Avg Loss: 0.4054
+Validation: 100%|██████████| 63/63 [00:29<00:00,  2.12it/s]
+Validation AUC: 0.5489
+Validation Loss (Epoch 2): 0.4243
+Validation Loss: 0.4243
+Epoch 3:   1%|          | 5/563 [00:04<08:11,  1.13it/s]wandb: WARNING Tried to log to step 1 that is less than the current step 1124. Steps must be monotonically increasing, so this data will be ignored. See https://wandb.me/define-metric to log data out of order.
+Epoch 3: 100%|██████████| 563/563 [08:16<00:00,  1.13it/s]
+Epoch 3 done in 496.1s | Avg Loss: 0.3939
+Validation: 100%|██████████| 63/63 [00:29<00:00,  2.14it/s]
+Validation AUC: 0.5585
+Validation Loss (Epoch 3): 0.4231
+Validation Loss: 0.4231
+Epoch 4:   1%|▏         | 8/563 [00:07<08:09,  1.13it/s]wandb: WARNING Tried to log to step 2 that is less than the current step 1686. Steps must be monotonically increasing, so this data will be ignored. See https://wandb.me/define-metric to log data out of order.
+Epoch 4: 100%|██████████| 563/563 [08:15<00:00,  1.14it/s]
+Epoch 4 done in 495.6s | Avg Loss: 0.3872
+Validation: 100%|██████████| 63/63 [00:29<00:00,  2.14it/s]
+Validation AUC: 0.5621
+Validation Loss (Epoch 4): 0.4213
+Validation Loss: 0.4213
+Epoch 5:   0%|          | 0/563 [00:00<?, ?it/s]wandb: WARNING Tried to log to step 3 that is less than the current step 2248. Steps must be monotonically increasing, so this data will be ignored. See https://wandb.me/define-metric to log data out of order.
+Epoch 5: 100%|██████████| 563/563 [08:15<00:00,  1.14it/s]
+Epoch 5 done in 495.9s | Avg Loss: 0.3829
+Validation: 100%|██████████| 63/63 [00:29<00:00,  2.14it/s]
+Validation AUC: 0.5631
+Validation Loss (Epoch 5): 0.4208
+Validation Loss: 0.4208
+wandb: WARNING Tried to log to step 4 that is less than the current step 2810. Steps must be monotonically increasing, so this data will be ignored. See https://wandb.me/define-metric to log data out of order.
+Router weights and tokenizer saved to models/router_qwen2.5

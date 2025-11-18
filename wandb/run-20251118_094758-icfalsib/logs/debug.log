@@ -1,0 +1,21 @@
+2025-11-18 09:47:59,202 INFO    MainThread:42788 [wandb_setup.py:_flush():80] Current SDK version is 0.23.0
+2025-11-18 09:47:59,218 INFO    MainThread:42788 [wandb_setup.py:_flush():80] Configure stats pid to 42788
+2025-11-18 09:47:59,222 INFO    MainThread:42788 [wandb_setup.py:_flush():80] Loading settings from /root/.config/wandb/settings
+2025-11-18 09:47:59,226 INFO    MainThread:42788 [wandb_setup.py:_flush():80] Loading settings from /workspace/wandb/settings
+2025-11-18 09:47:59,230 INFO    MainThread:42788 [wandb_setup.py:_flush():80] Loading settings from environment variables
+2025-11-18 09:47:59,240 INFO    MainThread:42788 [wandb_init.py:setup_run_log_directory():713] Logging user logs to /workspace/wandb/run-20251118_094758-icfalsib/logs/debug.log
+2025-11-18 09:47:59,247 INFO    MainThread:42788 [wandb_init.py:setup_run_log_directory():714] Logging internal logs to /workspace/wandb/run-20251118_094758-icfalsib/logs/debug-internal.log
+2025-11-18 09:47:59,248 INFO    MainThread:42788 [wandb_init.py:init():840] calling init triggers
+2025-11-18 09:47:59,249 INFO    MainThread:42788 [wandb_init.py:init():845] wandb.init called with sweep_config: {}
+config: {'base': 'Qwen/Qwen2.5-1.5B-Instruct', 'device': device(type='cuda'), 'model_keys': {'gpt-5-nano-2025-08-07_response': (0.05, 0.4), 'grok-4-fast-reasoning_response': (0.2, 0.5), 'openai_gpt-oss-120b_response': (0.05, 0.24), 'openai_gpt-oss-20b_response': (0.03, 0.14), 'nvidia_NVIDIA-Nemotron-Nano-9B-v2_response': (0.04, 0.16), 'meta-llama_Llama-3.2-11B-Vision-Instruct_response': (0.049, 0.049), 'moonshotai_Kimi-K2-Instruct-0905_response': (0.5, 2.0), 'gemini-2.5-flash-lite_response': (0.1, 0.4)}, 'PEAK_LR': 1e-06, 'BATCH_SIZE': 32, 'EPOCHS': 5, 'WEIGHT_DECAY': 0.04, 'NUM_WARMUP_STEPS': 50, 'SAVE_PATH': 'models/router_qwen2.5', '_wandb': {}}
+2025-11-18 09:47:59,249 INFO    MainThread:42788 [wandb_init.py:init():888] starting backend
+2025-11-18 09:47:59,559 INFO    MainThread:42788 [wandb_init.py:init():891] sending inform_init request
+2025-11-18 09:47:59,582 INFO    MainThread:42788 [wandb_init.py:init():899] backend started and connected
+2025-11-18 09:47:59,591 INFO    MainThread:42788 [wandb_init.py:init():969] updated telemetry
+2025-11-18 09:47:59,759 INFO    MainThread:42788 [wandb_init.py:init():993] communicating run to backend with 90.0 second timeout
+2025-11-18 09:48:00,350 INFO    MainThread:42788 [wandb_init.py:init():1040] starting run threads in backend
+2025-11-18 09:48:00,561 INFO    MainThread:42788 [wandb_run.py:_console_start():2504] atexit reg
+2025-11-18 09:48:00,566 INFO    MainThread:42788 [wandb_run.py:_redirect():2352] redirect: wrap_raw
+2025-11-18 09:48:00,571 INFO    MainThread:42788 [wandb_run.py:_redirect():2421] Wrapping output streams.
+2025-11-18 09:48:00,575 INFO    MainThread:42788 [wandb_run.py:_redirect():2444] Redirects installed.
+2025-11-18 09:48:00,591 INFO    MainThread:42788 [wandb_init.py:init():1080] run started, returning control to user process

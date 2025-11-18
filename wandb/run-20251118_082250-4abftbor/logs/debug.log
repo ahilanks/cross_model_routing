@@ -1,0 +1,26 @@
+2025-11-18 08:22:51,266 INFO    MainThread:9256 [wandb_setup.py:_flush():80] Current SDK version is 0.23.0
+2025-11-18 08:22:51,267 INFO    MainThread:9256 [wandb_setup.py:_flush():80] Configure stats pid to 9256
+2025-11-18 08:22:51,268 INFO    MainThread:9256 [wandb_setup.py:_flush():80] Loading settings from /root/.config/wandb/settings
+2025-11-18 08:22:51,269 INFO    MainThread:9256 [wandb_setup.py:_flush():80] Loading settings from /workspace/wandb/settings
+2025-11-18 08:22:51,269 INFO    MainThread:9256 [wandb_setup.py:_flush():80] Loading settings from environment variables
+2025-11-18 08:22:51,270 INFO    MainThread:9256 [wandb_init.py:setup_run_log_directory():713] Logging user logs to /workspace/wandb/run-20251118_082250-4abftbor/logs/debug.log
+2025-11-18 08:22:51,271 INFO    MainThread:9256 [wandb_init.py:setup_run_log_directory():714] Logging internal logs to /workspace/wandb/run-20251118_082250-4abftbor/logs/debug-internal.log
+2025-11-18 08:22:51,272 INFO    MainThread:9256 [wandb_init.py:init():840] calling init triggers
+2025-11-18 08:22:51,272 INFO    MainThread:9256 [wandb_init.py:init():845] wandb.init called with sweep_config: {}
+config: {'base': 'Qwen/Qwen2.5-1.5B-Instruct', 'device': device(type='cuda'), 'model_keys': {'gpt-5-nano-2025-08-07_response': (0.05, 0.4), 'grok-4-fast-reasoning_response': (0.2, 0.5), 'openai_gpt-oss-120b_response': (0.05, 0.24), 'openai_gpt-oss-20b_response': (0.03, 0.14), 'nvidia_NVIDIA-Nemotron-Nano-9B-v2_response': (0.04, 0.16), 'meta-llama_Llama-3.2-11B-Vision-Instruct_response': (0.049, 0.049), 'moonshotai_Kimi-K2-Instruct-0905_response': (0.5, 2.0), 'gemini-2.5-flash-lite_response': (0.1, 0.4)}, 'PEAK_LR': 1e-06, 'BATCH_SIZE': 16, 'EPOCHS': 8, 'WEIGHT_DECAY': 0.04, 'NUM_WARMUP_STEPS': 50, 'SAVE_PATH': 'models/router_qwen2.5', '_wandb': {}}
+2025-11-18 08:22:51,273 INFO    MainThread:9256 [wandb_init.py:init():888] starting backend
+2025-11-18 08:22:51,600 INFO    MainThread:9256 [wandb_init.py:init():891] sending inform_init request
+2025-11-18 08:22:51,651 INFO    MainThread:9256 [wandb_init.py:init():899] backend started and connected
+2025-11-18 08:22:51,654 INFO    MainThread:9256 [wandb_init.py:init():969] updated telemetry
+2025-11-18 08:22:51,835 INFO    MainThread:9256 [wandb_init.py:init():993] communicating run to backend with 90.0 second timeout
+2025-11-18 08:22:53,319 INFO    MainThread:9256 [wandb_init.py:init():1040] starting run threads in backend
+2025-11-18 08:22:53,471 INFO    MainThread:9256 [wandb_run.py:_console_start():2504] atexit reg
+2025-11-18 08:22:53,474 INFO    MainThread:9256 [wandb_run.py:_redirect():2352] redirect: wrap_raw
+2025-11-18 08:22:53,481 INFO    MainThread:9256 [wandb_run.py:_redirect():2421] Wrapping output streams.
+2025-11-18 08:22:53,485 INFO    MainThread:9256 [wandb_run.py:_redirect():2444] Redirects installed.
+2025-11-18 08:22:53,500 INFO    MainThread:9256 [wandb_init.py:init():1080] run started, returning control to user process
+2025-11-18 08:26:38,776 INFO    MainThread:9256 [wandb_run.py:_finish():2270] finishing run ahilan-uc-berkeley-electrical-engineering-computer-sciences/router_qwen2.5/4abftbor
+2025-11-18 08:26:38,786 INFO    MainThread:9256 [wandb_run.py:_atexit_cleanup():2469] got exitcode: 0
+2025-11-18 08:26:38,838 INFO    MainThread:9256 [wandb_run.py:_restore():2451] restore
+2025-11-18 08:26:38,843 INFO    MainThread:9256 [wandb_run.py:_restore():2457] restore done
+2025-11-18 08:26:39,803 INFO    MainThread:9256 [wandb_run.py:_footer_sync_info():3853] logging synced files

@@ -12,7 +12,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import roc_auc_score, accuracy_score
 import numpy as np
 import wandb
-
+from datasets import load_dataset
+from datetime import datetime
 
 CONFIG = {
     "base": "Qwen/Qwen2.5-1.5B-Instruct", # base model
@@ -39,88 +40,32 @@ CONFIG = {
 }
 
 
-def load_data(file_path, length=None):
-    records = []
-    with open(file_path, "r") as f:
-        for line in f:
-            if length and len(records) >= length:
-                break
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                print("Bad line:", e)
-    df = pd.DataFrame(records)
+def load_data(dataset, model_name, length=None):
+    ds = load_dataset(dataset, split="train")
+    if length is not None:
+        ds = ds.select(range(length))
 
-    # merge by model keys
-    grouped = df.groupby("index")
-    merged_rows = []
-    for idx, group in grouped:
-        merged_row = group.iloc[0].copy()
-        for m in CONFIG["model_keys"]:
-            vals = group[m].dropna().tolist()
-            if vals:
-                merged_row[m] = vals[-1]
-        merged_rows.append(merged_row)
-    df = pd.DataFrame(merged_rows).reset_index(drop=True)
-
-    # clean & get is_correct, and total_price
-    for idx, row in df.iterrows():
-        for col in CONFIG["model_keys"].keys():
-            if pd.notna(row.get(col)) and isinstance(row[col], dict):
-                entry = row[col].copy()
-
-                # parse final answer
-                answer = entry.get('answer', '')
-                if answer and 'Final Answer:' in answer:
-                    final_answer_str = answer.split("Final Answer:")[1].strip()
-                    try:
-                        final_answer = int(final_answer_str)
-                    except ValueError:
-                        final_answer = 0
-                    entry['final_answer'] = final_answer
-
-                    correct_answer = row.get('correct_answer', '')
-                    entry['is_correct'] = (final_answer == correct_answer)
-
-                # compute total price
-                input_tokens = entry.get('input_tokens', 0)
-                output_tokens = entry.get('output_tokens', 0)
-                input_rate, output_rate = CONFIG["model_keys"][col]
-                entry['total_price'] = (input_tokens * (input_rate / 1000000) + output_tokens * (output_rate / 1000000)) * 1000 # kind of normalizing
-
-                # default missing numeric fields to 0
-                entry['total_latency'] = entry.get('total_latency', 0) or 0
-                entry['is_correct'] = entry.get('is_correct', False)
-
-                df.at[idx, col] = entry
-
-    # Drop rows with missing or invalid question
-    df = df[df['question'].notna() & (df['question'] != '')].reset_index(drop=True)
-
-    # Ensure no nulls in key model fields (example: gemini)
-    key_model = 'gemini-2.5-flash-lite_response'
-    df = df[
-        df[key_model].apply(lambda x: isinstance(x, dict) and all(k in x and x[k] is not None for k in ['is_correct', 'total_latency', 'total_price']))
-    ].reset_index(drop=True)
+    df = ds.to_pandas()
 
     # Split into train and validation
     df_train = df.sample(frac=0.9, random_state=42)
     df_val = df.drop(df_train.index).reset_index(drop=True)
     df_train = df_train.reset_index(drop=True)
+    df_train, df_val = df_train[['question', model_name]], df_val[['question', model_name]]
 
-    num_pos = sum(df_train['gemini-2.5-flash-lite_response'].apply(lambda d: d['is_correct']))
+    num_pos = sum(df_train[model_name].apply(lambda d: d['is_correct']))
     num_neg = len(df_train) - num_pos
     weight_value = num_neg / num_pos
 
     return df_train, df_val, weight_value
 
-def df_to_tensors(df):
+def df_to_tensors(df, model_name):
     queries, t_acc, t_lat, t_price = [], [], [], []
     for idx, row in df.iterrows():
         queries.append(row['question'])
-        t_acc.append(row['gemini-2.5-flash-lite_response']['is_correct'])
-        t_lat.append(np.log1p(row['gemini-2.5-flash-lite_response']['total_latency'])) #log tranform for latency and price
-        t_price.append(np.log1p(row['gemini-2.5-flash-lite_response']['total_price']))
+        t_acc.append(row[model_name]['is_correct'])
+        t_lat.append(np.log1p(row[model_name]['total_latency'])) #log tranform for latency and price
+        t_price.append(np.log1p(row[model_name]['total_price']))
     return queries, t_acc, t_lat, t_price
 
 class Router(nn.Module):
@@ -179,9 +124,9 @@ class RouterLoss(nn.Module):
         return total_loss, loss_acc, loss_lat, loss_price
 
 
-def validate(router, tokenizer, df_val, loss_fn, device, epoch=0, global_step=0):
+def validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch=0, global_step=0):
     router.eval()
-    queries, t_acc, t_lat, t_price = df_to_tensors(df_val)
+    queries, t_acc, t_lat, t_price = df_to_tensors(df_val, model_name)
     inputs = tokenizer(queries, padding=True, truncation=True, return_tensors='pt')
 
     targets = {
@@ -241,7 +186,7 @@ def validate(router, tokenizer, df_val, loss_fn, device, epoch=0, global_step=0)
     return avg_loss
 
 
-def train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, device, epochs, batch_size):
+def train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, scheduler, device, epochs, batch_size):
     router.train()
     global_step = 0
 
@@ -293,14 +238,14 @@ def train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, d
             scheduler.step()
 
             total_loss += loss.item()
-            wandb.log({"loss/train": loss.item(), "lr": scheduler.get_last_lr()[0]}, step=global_step)
+            wandb.log({"lr": scheduler.get_last_lr()[0]}, step=global_step)
             global_step += 1
 
         avg_loss = total_loss / (len(inputs['input_ids']) / batch_size)
         print(f"Epoch {epoch+1} done in {time.time()-start_time:.1f}s | Avg Loss: {avg_loss:.4f}")
         wandb.log({"loss/epoch_avg": avg_loss}, step=global_step)
 
-        val_loss = validate(router, tokenizer, df_val, loss_fn, device, epoch, global_step)
+        val_loss = validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch, global_step)
         print(f"Validation Loss: {val_loss:.4f}")
 
 def infer(router, tokenizer, prompt, device):
@@ -318,19 +263,22 @@ def infer(router, tokenizer, prompt, device):
     }
 
 def main():
+    model_name = "gpt-5-nano-2025-08-07_response"
     print("Loading data...")
-    df_train, df_val, weight_value = load_data("data/all_providers_results_parallelized.jsonl", length=5000)
-    df_train, df_val = df_train[['question', 'gemini-2.5-flash-lite_response']], df_val[['question', 'gemini-2.5-flash-lite_response']]
+    df_train, df_val, weight_value = load_data("a5ilank/RouterBench2.0", model_name, length=5000)
+    
 
     print("Training data size:", len(df_train), "Validation data size:", len(df_val))
     print(f"Using pos_weight: {weight_value:.4f} to handle class imbalance.")
 
     wandb.init(
         project="router_qwen2.5",
-        config=CONFIG
+        entity="ahilan-uc-berkeley-electrical-engineering-computer-sciences",
+        config=CONFIG,
+        name = f"run_{model_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     )
     
-    queries, t_acc, t_lat, t_price = df_to_tensors(df_train)
+    queries, t_acc, t_lat, t_price = df_to_tensors(df_train, model_name)
 
     torch.cuda.empty_cache()
 
@@ -372,7 +320,7 @@ def main():
     scheduler = get_linear_schedule_with_warmup(opt, num_warmup_steps=CONFIG["NUM_WARMUP_STEPS"], num_training_steps=num_training_steps)
 
     print("Training router...")
-    train(router, tokenizer, inputs, targets, df_val, opt, loss_fn, scheduler, CONFIG["device"], epochs=CONFIG["EPOCHS"], batch_size=CONFIG["BATCH_SIZE"])
+    train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, scheduler, CONFIG["device"], epochs=CONFIG["EPOCHS"], batch_size=CONFIG["BATCH_SIZE"])
 
     
     os.makedirs(CONFIG["SAVE_PATH"], exist_ok=True)

@@ -1,5 +1,0 @@
-Trainable: 190,734,851, Frozen: 1,356,523,008
-Training router...
-Epoch 1:   0%|          | 0/62 [00:00<?, ?it/s]/usr/local/lib/python3.12/dist-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
-  warnings.warn(
-Epoch 1:  66%|██████▌   | 41/62 [00:32<00:16,  1.27it/s]

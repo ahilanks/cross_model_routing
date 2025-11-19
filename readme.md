@@ -1,5 +1,7 @@
-start command
+TO START PROJECT IN NEW ENV:
 
-pip install transformers pandas tqdm scikit-learn numpy wandb
+$pip install transformers pandas tqdm scikit-learn numpy wandb datasets hf_transfer
 
-python router_final.py
+$wandb login
+
+$python router_final.py OR ./start_training.sh

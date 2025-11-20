@@ -31,22 +31,39 @@ CONFIG = {
         'gemini-2.5-flash-lite_response': (0.10, 0.40),
     },
 
-    "NUM_UNFROZEN": 3,
-    "PEAK_LR": 5e-6,
+    "LENGTH": 10000,
+    "NUM_UNFROZEN": 1,
+    "PEAK_LR": 5e-5,
     "BATCH_SIZE": 32,
-    "EPOCHS": 5,
+    "EPOCHS": 20,
     "WEIGHT_DECAY": 0.1,
     "NUM_WARMUP_STEPS": 50,
-    "SAVE_PATH": "models/router_qwen2.5"
+    "SAVE_PATH": "models/router_qwen2.5",
+    "DROPOUT": 0.4
 }
 
 
 def load_data(dataset, model_name, length=None):
     ds = load_dataset(dataset, split="train")
-    if length is not None:
-        ds = ds.select(range(length))
+    # if length is not None:
+    #     ds = ds.select(range(length))
 
     df = ds.to_pandas()
+
+    df_neg = df[df[model_name].apply(lambda d: d['is_correct'] is False)]
+    df_pos = df[df[model_name].apply(lambda d: d['is_correct'] is True)]
+
+    if length is not None:
+        if len(df_neg) >= length:
+            df_neg = df_neg.sample(length // 2)
+            df_pos = df_pos.sample(length // 2)
+        else:
+            remaining = length - len(df_neg)
+            df_pos = df_pos.sample(n=remaining, random_state=42, replace=(len(df_pos) < remaining))
+        
+    df = pd.concat([df_neg, df_pos], ignore_index=True)
+    df = df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+
 
     # Split into train and validation
     df_train = df.sample(frac=0.9, random_state=42)
@@ -59,6 +76,7 @@ def load_data(dataset, model_name, length=None):
     weight_value = num_neg / num_pos
 
     return df_train, df_val, weight_value
+    #return df_train, df_val
 
 # --- CHANGE: Removed lat and price extraction ---
 def df_to_tensors(df, model_name):
@@ -77,8 +95,7 @@ class Router(nn.Module):
         )
         self.hidden_size = self.base_model.config.hidden_size 
 
-        # --- CHANGE: Removed lat_head and price_head ---
-        self.acc_head = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size // 2), nn.GELU(), nn.Linear(self.hidden_size // 2, 1))
+        self.acc_head = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size // 2), nn.Dropout(CONFIG["DROPOUT"]), nn.GELU(), nn.Linear(self.hidden_size // 2, 1))
 
     def forward(self, input_ids, attention_mask=None):
         outputs = self.base_model(
@@ -96,10 +113,11 @@ class Router(nn.Module):
 
 class RouterLoss(nn.Module):
     # --- CHANGE: Removed weight_lat and weight_price arguments ---
-    def __init__(self, pos_weight=None):
+    def __init__(self, pos_weight):
             super().__init__()
             # --- CHANGE: Removed MSELoss ---
             self.bce = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            #self.bce = nn.BCEWithLogitsLoss()
 
     def forward(self, preds, targets):
         # --- CHANGE: Removed lat and price loss calculation and weighting ---
@@ -146,20 +164,24 @@ def validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch=0, gl
 
             # --- CHANGE: Removed logging for lat and price ---
             wandb.log({
-                "loss/val_total": loss.item(),
                 "loss/val_acc": loss.item(), # total is same as acc now
             }, step=global_step)
             
             total_val_loss += loss.item()
             num_batches += 1
 
-    try:
-        val_auc = roc_auc_score(all_targets_acc, all_preds_acc)
-    except ValueError:
-        val_auc = 0.5 # Handle single-class edge cases
+    val_auc = roc_auc_score(all_targets_acc, all_preds_acc)
+    threshold = 0.5
+    pred_labels = (np.array(all_preds_acc) >= threshold).astype(int)
+    target_labels = np.array(all_targets_acc).astype(int)
+
+    threshold_acc = (pred_labels == target_labels).mean()
+
+
 
     print(f"Validation AUC: {val_auc:.4f}")
-    wandb.log({"val/auc": val_auc}, step=global_step)
+    print(f"Validation Threshold Accuracy: {threshold_acc:.4f}")
+    wandb.log({"val/auc": val_auc, "val/acc@0.5": threshold_acc}, step=global_step)
 
 
     avg_loss = total_val_loss / num_batches
@@ -199,7 +221,6 @@ def train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, 
 
             # --- CHANGE: Wandb logging update ---
             wandb.log({
-                "loss/train_total": loss.item(),
                 "loss/train_acc": loss.item(),
                 "lr": scheduler.get_last_lr()[0]
             }, step=global_step)
@@ -220,7 +241,6 @@ def train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, 
             scheduler.step()
 
             total_loss += loss.item()
-            wandb.log({"loss/train": loss.item(), "lr": scheduler.get_last_lr()[0]}, step=global_step)
             global_step += 1
 
         avg_loss = total_loss / (len(inputs['input_ids']) / batch_size)
@@ -242,11 +262,39 @@ def infer(router, tokenizer, prompt, device):
         # --- CHANGE: Removed latency and price return ---
     }
 
+def test_inference(router, tokenizer, device):
+    """Test inference on 10 different queries."""
+    test_queries = [
+        "Explain why the sky is blue.",
+        "What is the capital of France?",
+        "How does photosynthesis work?",
+        "Write a Python function to calculate the factorial of a number.",
+        "What are the main causes of climate change?",
+        "Explain the difference between machine learning and deep learning.",
+        "What is the time complexity of quicksort?",
+        "Describe the process of DNA replication.",
+        "How do neural networks learn?",
+        "What is the difference between HTTP and HTTPS?",
+    ]
+    
+    print("\n" + "="*60)
+    print("Testing inference on 10 different queries:")
+    print("="*60)
+    
+    for i, query in enumerate(test_queries, 1):
+        result = infer(router, tokenizer, query, device)
+        print(f"\nQuery {i}: {query}")
+        print(f"Predicted Accuracy: {result['predicted_accuracy']:.4f}")
+    
+    print("\n" + "="*60)
+    print("Inference testing complete.")
+    print("="*60 + "\n")
+
 def main():
     model_name = "gemini-2.5-flash-lite_response"
     print("Loading data...")
-    df_train, df_val, weight_value = load_data("a5ilank/RouterBench2.0", model_name)
-    
+    df_train, df_val, weight_value = load_data("a5ilank/RouterBench2.0", model_name, CONFIG["LENGTH"])
+    #df_train, df_val = load_data("a5ilank/RouterBench2.0", model_name, CONFIG["LENGTH"])
 
     print("Training data size:", len(df_train), "Validation data size:", len(df_val))
     print(f"Using pos_weight: {weight_value:.4f} to handle class imbalance.")
@@ -295,6 +343,7 @@ def main():
 
     opt = optim.AdamW(router.parameters(), lr=CONFIG["PEAK_LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
     loss_fn = RouterLoss(pos_weight=pos_weight_tensor)
+    #loss_fn = RouterLoss()
     num_training_steps = (len(inputs['input_ids']) // CONFIG["BATCH_SIZE"]) * CONFIG["EPOCHS"]
     scheduler = get_linear_schedule_with_warmup(opt, num_warmup_steps=CONFIG["NUM_WARMUP_STEPS"], num_training_steps=num_training_steps)
 
@@ -307,11 +356,14 @@ def main():
     torch.save(router.state_dict(), os.path.join(CONFIG["SAVE_PATH"], "router.pt"))
     tokenizer.save_pretrained(CONFIG["SAVE_PATH"])
     print(f"Router weights and tokenizer saved to {CONFIG['SAVE_PATH']}")
-    wandb.finish()
+    
 
     # Test inference
-    test_query = "Explain why the sky is blue."
-    print("Example inference:", infer(router, tokenizer, test_query, CONFIG["device"]))
+    test_inference(router, tokenizer, CONFIG["device"])
+
+    print("Finishing wandb...")
+    time.sleep(10)
+    wandb.finish()
     
 if __name__ == "__main__":
     main()

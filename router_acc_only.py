@@ -36,16 +36,17 @@ CONFIG = {
         'gemini-2.5-flash-lite_response': (0.10, 0.40),
     },
 
-    "LENGTH": 7622,
+    "LENGTH": 7000,
     "NUM_UNFROZEN": 0,
-    "PEAK_LR": 5e-5,
+    "PEAK_LR": 1e-4,
     "BATCH_SIZE": 32,
-    "EPOCHS": 5,
+    "EPOCHS": 8,
     "WEIGHT_DECAY": 0.1,
     "NUM_WARMUP_STEPS": 50,
     "SAVE_PATH": "models",
     "DROPOUT": 0.4,
-    "NUM_LAYERS": 8
+    "NUM_LAYERS": 8,
+    "DATASET": "a5ilank/RouterBench2.0"
 }
 
 
@@ -318,7 +319,7 @@ def main():
 
     model_name = "gemini-2.5-flash-lite_response"
     print("Loading data...")
-    df_train, df_val, weight_value = load_data("a5ilank/RouterBench2.0", model_name, CONFIG["LENGTH"])
+    df_train, df_val, weight_value = load_data(CONFIG["DATASET"], model_name, CONFIG["LENGTH"])
     #df_train, df_val = load_data("a5ilank/RouterBench2.0", model_name, CONFIG["LENGTH"])
 
     print("Training data size:", len(df_train), "Validation data size:", len(df_val))
@@ -382,11 +383,12 @@ def main():
     train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, scheduler, CONFIG["device"], epochs=CONFIG["EPOCHS"], batch_size=CONFIG["BATCH_SIZE"])
 
     
-    os.makedirs(CONFIG["SAVE_PATH"], exist_ok=True)
+    save_dir = os.path.join(CONFIG["SAVE_PATH"], "gemini")
+    os.makedirs(save_dir, exist_ok=True)
 
-    torch.save(router.state_dict(), os.path.join(CONFIG["SAVE_PATH"], f"router_{model_name}.pt"))
-    tokenizer.save_pretrained(os.path.join(CONFIG["SAVE_PATH"], f"tokenizer_{model_name}"))
-    print(f"Router weights and tokenizer saved to {CONFIG['SAVE_PATH']}")
+    torch.save(router.state_dict(), os.path.join(save_dir, "router.pt"))
+    tokenizer.save_pretrained(os.path.join(save_dir, "tokenizer"))
+    print(f"Router weights and tokenizer saved to {save_dir}")
     
 
     # Test inference

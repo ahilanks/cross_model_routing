@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
 import json
 import re
@@ -14,6 +15,10 @@ import numpy as np
 import wandb
 from datasets import load_dataset
 from datetime import datetime
+
+def setup():
+    dist.init_process_group("nccl")
+    torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
 
 CONFIG = {
     "base": "Qwen/Qwen2.5-1.5B-Instruct", # base model
@@ -31,15 +36,16 @@ CONFIG = {
         'gemini-2.5-flash-lite_response': (0.10, 0.40),
     },
 
-    "LENGTH": 10000,
-    "NUM_UNFROZEN": 1,
+    "LENGTH": 7622,
+    "NUM_UNFROZEN": 0,
     "PEAK_LR": 5e-5,
     "BATCH_SIZE": 32,
-    "EPOCHS": 20,
+    "EPOCHS": 5,
     "WEIGHT_DECAY": 0.1,
     "NUM_WARMUP_STEPS": 50,
-    "SAVE_PATH": "models/router_qwen2.5",
-    "DROPOUT": 0.4
+    "SAVE_PATH": "models",
+    "DROPOUT": 0.4,
+    "NUM_LAYERS": 8
 }
 
 
@@ -87,7 +93,7 @@ def df_to_tensors(df, model_name):
     return queries, t_acc
 
 class Router(nn.Module):
-    def __init__(self, model_name):
+    def __init__(self, model_name, num_layers, dropout):
         super().__init__()
         self.base_model = AutoModel.from_pretrained(
             model_name,
@@ -95,7 +101,23 @@ class Router(nn.Module):
         )
         self.hidden_size = self.base_model.config.hidden_size 
 
-        self.acc_head = nn.Sequential(nn.Linear(self.hidden_size, self.hidden_size // 2), nn.Dropout(CONFIG["DROPOUT"]), nn.GELU(), nn.Linear(self.hidden_size // 2, 1))
+        layers = []
+        input_dim = self.hidden_size
+        
+        for _ in range(num_layers):
+            layers.append(nn.Linear(input_dim, input_dim // 2))
+            layers.append(nn.BatchNorm1d(input_dim // 2)) # Crucial for deep nets
+            layers.append(nn.Dropout(dropout))
+            layers.append(nn.GELU())
+            input_dim = input_dim // 2
+            
+            if input_dim < 32:
+                break
+
+        # Final layer
+        layers.append(nn.Linear(input_dim, 1))
+        
+        self.acc_head = nn.Sequential(*layers)
 
     def forward(self, input_ids, attention_mask=None):
         outputs = self.base_model(
@@ -162,9 +184,8 @@ def validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch=0, gl
                 all_preds_acc.extend(torch.sigmoid(preds['acc']).detach().float().cpu().numpy())
                 all_targets_acc.extend(b_target['acc'].detach().float().cpu().numpy())
 
-            # --- CHANGE: Removed logging for lat and price ---
             wandb.log({
-                "loss/val_acc": loss.item(), # total is same as acc now
+                "loss/val_acc": loss.item(),
             }, step=global_step)
             
             total_val_loss += loss.item()
@@ -187,7 +208,6 @@ def validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch=0, gl
     avg_loss = total_val_loss / num_batches
 
     print(f"Validation Loss (Epoch {epoch+1}): {avg_loss:.4f}")
-    wandb.log({"loss/val": avg_loss}, step=epoch)
     return avg_loss
 
 
@@ -245,10 +265,8 @@ def train(router, tokenizer, inputs, targets, df_val, model_name, opt, loss_fn, 
 
         avg_loss = total_loss / (len(inputs['input_ids']) / batch_size)
         print(f"Epoch {epoch+1} done in {time.time()-start_time:.1f}s | Avg Loss: {avg_loss:.4f}")
-        wandb.log({"loss/epoch_avg": avg_loss}, step=global_step)
 
         val_loss = validate(router, tokenizer, df_val, model_name, loss_fn, device, epoch, global_step)
-        print(f"Validation Loss: {val_loss:.4f}")
 
 def infer(router, tokenizer, prompt, device):
     router.eval()
@@ -291,6 +309,13 @@ def test_inference(router, tokenizer, device):
     print("="*60 + "\n")
 
 def main():
+
+    #setup()
+
+    # local_rank = int(os.environ["LOCAL_RANK"])
+    # device = torch.device(f"cuda:{local_rank}")
+
+
     model_name = "gemini-2.5-flash-lite_response"
     print("Loading data...")
     df_train, df_val, weight_value = load_data("a5ilank/RouterBench2.0", model_name, CONFIG["LENGTH"])
@@ -319,27 +344,33 @@ def main():
         'acc': torch.tensor(t_acc, dtype=torch.float32).unsqueeze(1).to(CONFIG["device"]),
     }
 
-    router = Router(CONFIG["base"]).to(CONFIG["device"])
+    router = Router(CONFIG["base"], num_layers=CONFIG["NUM_LAYERS"], dropout=CONFIG["DROPOUT"]).to(CONFIG["device"])
+    
     pos_weight_tensor = torch.tensor([weight_value]).to(CONFIG["device"])
 
     for param in router.base_model.parameters():
         param.requires_grad = False
 
-    num_unfrozen = CONFIG["NUM_UNFROZEN"]
-    layers = router.base_model.layers
-    for layer in layers[-num_unfrozen:]:
-        layer.to(torch.float32)
-        for param in layer.parameters():
-            param.requires_grad = True
+    # num_unfrozen = CONFIG["NUM_UNFROZEN"]
+    # layers = router.base_model.layers
+    # for layer in layers[-num_unfrozen:]:
+    #     layer.to(torch.float32)
+    #     for param in layer.parameters():
+    #         param.requires_grad = True
 
-    trainable, frozen = 0, 0
-    for n, p in router.named_parameters():
-        if p.requires_grad:
-            trainable += p.numel()
-        else:
-            frozen += p.numel()
-    print(f"Trainable: {trainable:,}, Frozen: {frozen:,}")
+    # trainable, frozen = 0, 0
+    # for n, p in router.named_parameters():
+    #     if p.requires_grad:
+    #         trainable += p.numel()
+    #     else:
+    #         frozen += p.numel()
+    # print(f"Trainable: {trainable:,}, Frozen: {frozen:,}")
 
+    # router = torch.nn.parallel.DistributedDataParallel(
+    #     router, 
+    #     device_ids=[local_rank],
+    #     output_device=local_rank
+    # )
 
     opt = optim.AdamW(router.parameters(), lr=CONFIG["PEAK_LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
     loss_fn = RouterLoss(pos_weight=pos_weight_tensor)
@@ -353,8 +384,8 @@ def main():
     
     os.makedirs(CONFIG["SAVE_PATH"], exist_ok=True)
 
-    torch.save(router.state_dict(), os.path.join(CONFIG["SAVE_PATH"], "router.pt"))
-    tokenizer.save_pretrained(CONFIG["SAVE_PATH"])
+    torch.save(router.state_dict(), os.path.join(CONFIG["SAVE_PATH"], f"router_{model_name}.pt"))
+    tokenizer.save_pretrained(os.path.join(CONFIG["SAVE_PATH"], f"tokenizer_{model_name}"))
     print(f"Router weights and tokenizer saved to {CONFIG['SAVE_PATH']}")
     
 
